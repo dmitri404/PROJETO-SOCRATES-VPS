@@ -1,0 +1,49 @@
+{
+  "database": {
+    "host": "supabase-db",
+    "port": 5432,
+    "name": "postgres",
+    "user": "postgres",
+    "password": "HKcSH_yTEsQ42cdEvhruQ9kNbrN54U4WfiLKDXD-Tf0",
+    "schema": "public"
+  },
+  "tables": {
+    "source": "pagamentos",
+    "target": "pagamentos_treated",
+    "log": "cleaner_log"
+  },
+  "processing": {
+    "batch_size": 100,
+    "check_interval_seconds": 500,
+    "skip_already_treated": true
+  },
+  "columns_copy": [
+    "id",
+    "empenho",
+    "created_at"
+  ],
+  "columns_treat": {
+    "pagamento": {
+      "rule": "strip_prefix",
+      "prefix": "Detalhes do Pagamento:"
+    },
+    "data": {
+      "rule": "strip_prefix",
+      "prefix": "Data do pagamento: "
+    },
+    "valor": {
+      "rule": "extract_valor"
+    },
+    "descricao": {
+      "rule": "parse_descricao",
+      "prefix": "Descricao:"
+    }
+  },
+  "evaluations": {
+    "enabled": false
+  },
+  "logging": {
+    "level": "INFO",
+    "file": "/dev/stdout"
+  }
+}

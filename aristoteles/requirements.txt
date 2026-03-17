@@ -1,0 +1,14 @@
+# PDF
+pdfplumber>=0.10.0
+PyPDF2>=3.0.1
+
+# OCR
+pytesseract>=0.3.10
+Pillow>=10.0.0
+pdf2image>=1.17.0
+
+# Monitoramento de pasta
+watchdog>=4.0.0
+
+# Supabase / PostgreSQL
+psycopg2-binary>=2.9.0

@@ -1,0 +1,72 @@
+services:
+
+  socrates:
+    image: socrates:latest
+    container_name: portal-socrates
+    restart: no
+    volumes:
+      - ./novo7/credentials.json:/app/credentials.json:ro
+      - ./logs:/app/logs
+    environment:
+      - TZ=America/Manaus
+      - SUPABASE_DB_HOST=supabase-db
+      - SUPABASE_DB_PORT=5432
+      - SUPABASE_DB_NAME=postgres
+      - SUPABASE_DB_USER=postgres
+      - SUPABASE_DB_PASSWORD=HKcSH_yTEsQ42cdEvhruQ9kNbrN54U4WfiLKDXD-Tf0
+    networks:
+      - portal_default
+      - supabase_default
+
+  aristoteles:
+    build: ./aristoteles
+    container_name: portal-aristoteles
+    restart: unless-stopped
+    volumes:
+      - ./aristoteles/pdfs:/app/pdfs
+      - ./logs:/app/logs
+    environment:
+      - TZ=America/Manaus
+      - SUPABASE_DB_HOST=supabase-db
+      - SUPABASE_DB_PORT=5432
+      - SUPABASE_DB_NAME=postgres
+      - SUPABASE_DB_USER=postgres
+      - SUPABASE_DB_PASSWORD=HKcSH_yTEsQ42cdEvhruQ9kNbrN54U4WfiLKDXD-Tf0
+      - LOG_FILE=/app/logs/aristoteles.log
+    networks:
+      - portal_default
+      - supabase_default
+
+  cleaner:
+    build: ./cleaner
+    container_name: portal-cleaner
+    restart: unless-stopped
+    networks:
+      - portal_default
+      - supabase_default
+    environment:
+      - TZ=America/Manaus
+
+  api:
+    build: ./api
+    container_name: portal-api
+    restart: unless-stopped
+    ports:
+      - 9000:9000
+    environment:
+      - TZ=America/Manaus
+      - DB_HOST=supabase-db
+      - DB_PORT=5432
+      - DB_NAME=postgres
+      - DB_USER=postgres
+      - DB_PASSWORD=HKcSH_yTEsQ42cdEvhruQ9kNbrN54U4WfiLKDXD-Tf0
+      - API_KEY_ARISTOTELES=aris-22386d82643aa6e36b12688a7175698d
+    networks:
+      - portal_default
+      - supabase_default
+
+networks:
+  portal_default:
+    driver: bridge
+  supabase_default:
+    external: true
