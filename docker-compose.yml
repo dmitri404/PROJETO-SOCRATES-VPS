@@ -21,7 +21,7 @@ services:
   aristoteles:
     build: ./aristoteles
     container_name: portal-aristoteles
-    restart: unless-stopped
+    restart: no
     volumes:
       - ./aristoteles/pdfs:/app/pdfs
       - ./logs:/app/logs
