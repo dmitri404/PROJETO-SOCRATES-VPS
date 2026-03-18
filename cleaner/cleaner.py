@@ -93,7 +93,7 @@ def parse_descricao(value):
     if m:
         result["nl_numero"] = m.group(1)
 
-    m = re.search(r'(?:NF(?:S-?[eE]|SE)?|[Nn]ota\s+[Ff]is[cx]al(?:\s+de\s+Servi[çc]o)?)\s*(?::?\s*N?[ºo°\.]*\s*)(\d+)', value)
+    m = re.search(r'(?:NF(?:S-?[eE]|SE)?|[Nn]ota\s+[Ff]is[cx]al(?:\s+de\s+Servi[çc]o)?)\s*(?::?\s*[Nn]?[ºo°\.]*\s*)(\d+)', value)
     if m:
         result["nf_numero"] = m.group(1)
 
