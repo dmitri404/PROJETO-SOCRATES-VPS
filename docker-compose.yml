@@ -1,8 +1,8 @@
 services:
 
-  socrates:
+  portal-municipal-mao:
     image: socrates:latest
-    container_name: portal-socrates
+    container_name: portal-municipal-mao
     restart: no
     volumes:
       - ./novo7/credentials.json:/app/credentials.json:ro
