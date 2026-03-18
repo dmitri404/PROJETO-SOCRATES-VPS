@@ -1,11 +1,12 @@
 """
 app.py — Processador de Notas Fiscais
-Le PDFs de pasta SMB e envia para a Portal API.
+Le PDFs de pastas SMB e envia para a Portal API conforme o perfil configurado.
 """
 
 import configparser
 import shutil
 import subprocess
+import sys
 import threading
 import tkinter as tk
 from pathlib import Path
@@ -16,13 +17,20 @@ from pdf_reader import extrair_texto
 from supabase_client import SupabaseClient
 
 # Credenciais da API — hardcoded, não expostas ao usuário
-_API_URL     = 'http://187.77.240.80:9000'
-_API_KEY     = 'aris-22386d82643aa6e36b12688a7175698d'
+_API_URL = 'http://187.77.240.80:9000'
+_API_KEYS = {
+    'portal_municipal_manaus': 'aris-22386d82643aa6e36b12688a7175698d',
+    'portal_estado_am':        'estam-52394a9ff66f976ee2ab097a6844a7a4',
+}
+_PORTAIS = list(_API_KEYS.keys())
 
 # Senha de acesso às configurações
 _SENHA_CONFIG = 'tambaqui@'
 
-CONFIG_FILE = Path.home() / 'AppData' / 'Roaming' / 'ProcessadorNF' / 'conf.ini'
+if getattr(sys, 'frozen', False):
+    CONFIG_FILE = Path(sys.executable).parent / 'conf.ini'
+else:
+    CONFIG_FILE = Path.home() / 'AppData' / 'Roaming' / 'ProcessadorNF' / 'conf.ini'
 CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
 
 
@@ -32,11 +40,47 @@ def carregar_config() -> configparser.ConfigParser:
     return cfg
 
 
-def salvar_config(path: str, usuario: str, senha: str) -> None:
-    cfg = configparser.ConfigParser()
-    cfg['SMB'] = {'path': path, 'usuario': usuario, 'senha': senha}
+def listar_perfis() -> list[dict]:
+    cfg = carregar_config()
+    perfis = []
+    for sec in cfg.sections():
+        if sec.startswith('PERFIL_'):
+            perfis.append({
+                'secao':    sec,
+                'nome':     cfg.get(sec, 'nome',     fallback=''),
+                'smb_path': cfg.get(sec, 'smb_path', fallback=''),
+                'usuario':  cfg.get(sec, 'usuario',  fallback=''),
+                'senha':    cfg.get(sec, 'senha',    fallback=''),
+                'portal':   cfg.get(sec, 'portal',   fallback='portal_municipal_manaus'),
+            })
+    return perfis
+
+
+def salvar_perfil(secao: str, nome: str, smb_path: str, usuario: str, senha: str, portal: str) -> None:
+    cfg = carregar_config()
+    cfg[secao] = {
+        'nome':     nome,
+        'smb_path': smb_path,
+        'usuario':  usuario,
+        'senha':    senha,
+        'portal':   portal,
+    }
     with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
         cfg.write(f)
+
+
+def remover_perfil(secao: str) -> None:
+    cfg = carregar_config()
+    if cfg.has_section(secao):
+        cfg.remove_section(secao)
+    with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+        cfg.write(f)
+
+
+def proximo_secao() -> str:
+    perfis = listar_perfis()
+    indices = [int(p['secao'].replace('PERFIL_', '')) for p in perfis if p['secao'].replace('PERFIL_', '').isdigit()]
+    return f'PERFIL_{max(indices) + 1}' if indices else 'PERFIL_1'
 
 
 def autenticar_smb(path: str, usuario: str, senha: str) -> None:
@@ -48,46 +92,39 @@ def autenticar_smb(path: str, usuario: str, senha: str) -> None:
     )
 
 
-def processar(log_fn, progress_fn, btn):
-    try:
-        cfg      = carregar_config()
-        smb_path = cfg['SMB']['path']
-        usuario  = cfg['SMB']['usuario']
-        senha    = cfg['SMB']['senha']
-    except Exception as e:
-        log_fn(f'ERRO ao ler configuracoes: {e}')
-        log_fn('Acesse Configuracoes para definir a pasta SMB.')
-        btn.config(state=tk.NORMAL)
+def processar_perfil(perfil: dict, log_fn, progress_fn):
+    nome    = perfil['nome']
+    portal  = perfil['portal']
+    api_key = _API_KEYS.get(portal)
+
+    if not api_key:
+        log_fn(f'[{nome}] ERRO: portal "{portal}" nao reconhecido.')
         return
 
-    log_fn('Autenticando na rede...')
-    autenticar_smb(smb_path, usuario, senha)
+    log_fn(f'\n[{nome}] Autenticando na rede...')
+    autenticar_smb(perfil['smb_path'], perfil['usuario'], perfil['senha'])
 
-    pasta = Path(smb_path)
+    pasta = Path(perfil['smb_path'])
     if not pasta.exists():
-        log_fn(f'ERRO: pasta nao encontrada: {smb_path}')
-        btn.config(state=tk.NORMAL)
+        log_fn(f'[{nome}] ERRO: pasta nao encontrada: {perfil["smb_path"]}')
         return
 
     pdfs = [p for p in pasta.rglob('*.pdf')
             if not any(x in p.parts for x in ('processados', 'erro'))]
 
     if not pdfs:
-        log_fn('Nenhum PDF encontrado na pasta.')
-        btn.config(state=tk.NORMAL)
+        log_fn(f'[{nome}] Nenhum PDF encontrado.')
         return
 
-    log_fn(f'{len(pdfs)} PDF(s) encontrado(s).')
+    log_fn(f'[{nome}] {len(pdfs)} PDF(s) encontrado(s) → {portal}')
     progress_fn(0, len(pdfs))
 
-    log_fn('Conectando ao servidor...')
     try:
-        db = SupabaseClient(_API_URL, _API_KEY, '')
+        db = SupabaseClient(_API_URL, api_key, portal)
         db.carregar_numeros_existentes()
-        log_fn(f'Cache carregado: {len(db._numeros_cache)} nota(s) existentes.')
+        log_fn(f'[{nome}] Cache: {len(db._numeros_cache)} nota(s) existentes.')
     except Exception as e:
-        log_fn(f'ERRO ao conectar servidor: {e}')
-        btn.config(state=tk.NORMAL)
+        log_fn(f'[{nome}] ERRO ao conectar servidor: {e}')
         return
 
     pasta_proc = pasta / 'processados'
@@ -95,9 +132,7 @@ def processar(log_fn, progress_fn, btn):
     pasta_proc.mkdir(exist_ok=True)
     pasta_erro.mkdir(exist_ok=True)
 
-    inseridos  = 0
-    duplicatas = 0
-    erros      = 0
+    inseridos = duplicatas = erros = 0
 
     for i, pdf in enumerate(pdfs, 1):
         progress_fn(i, len(pdfs))
@@ -114,62 +149,75 @@ def processar(log_fn, progress_fn, btn):
 
             if inserido:
                 inseridos += 1
-                log_fn(f'[{i}/{len(pdfs)}] OK: {pdf.name} | Nota {dados["NumeroNota"]} | R$ {dados["ValorLiquido"]}')
+                log_fn(f'[{nome}] [{i}/{len(pdfs)}] OK: {pdf.name} | Nota {dados["NumeroNota"]} | R$ {dados["ValorLiquido"]}')
             else:
                 duplicatas += 1
-                log_fn(f'[{i}/{len(pdfs)}] DUPLICATA: {pdf.name}')
+                log_fn(f'[{nome}] [{i}/{len(pdfs)}] DUPLICATA: {pdf.name}')
 
             shutil.move(str(pdf), str(pasta_proc / pdf.name))
 
         except Exception as e:
             erros += 1
-            log_fn(f'[{i}/{len(pdfs)}] ERRO: {pdf.name} — {e}')
+            log_fn(f'[{nome}] [{i}/{len(pdfs)}] ERRO: {pdf.name} — {e}')
             try:
                 shutil.move(str(pdf), str(pasta_erro / pdf.name))
             except Exception:
                 pass
 
-    log_fn('-' * 50)
-    log_fn(f'Concluido: {inseridos} inserido(s) | {duplicatas} duplicata(s) | {erros} erro(s)')
-    progress_fn(len(pdfs), len(pdfs))
+    log_fn(f'[{nome}] Concluido: {inseridos} inserido(s) | {duplicatas} duplicata(s) | {erros} erro(s)')
+
+
+def processar(perfis_selecionados, log_fn, progress_fn, btn):
+    if not perfis_selecionados:
+        log_fn('Nenhum perfil selecionado.')
+        btn.config(state=tk.NORMAL)
+        return
+
+    for perfil in perfis_selecionados:
+        processar_perfil(perfil, log_fn, progress_fn)
+
+    log_fn('\n' + '=' * 50)
+    log_fn('Todos os perfis processados.')
+    progress_fn(1, 1)
     btn.config(state=tk.NORMAL)
 
 
-class DialogConfiguracoes(tk.Toplevel):
+# ── Diálogo de perfil (adicionar/editar) ─────────────────────────────────────
 
-    def __init__(self, parent):
+class DialogPerfil(tk.Toplevel):
+
+    def __init__(self, parent, perfil: dict = None):
         super().__init__(parent)
-        self.title('Configuracoes')
+        self.title('Novo Perfil' if perfil is None else 'Editar Perfil')
         self.resizable(False, False)
         self.grab_set()
+        self.resultado = None
+        self._perfil = perfil
 
-        pad = {'padx': 12, 'pady': 6}
+        frame = tk.Frame(self, padx=16, pady=12)
+        frame.pack()
 
-        tk.Label(self, text='Configuracoes SMB', font=('Segoe UI', 11, 'bold')).pack(**pad)
+        campos = [
+            ('Nome do perfil:', 'nome'),
+            ('Pasta SMB:',      'smb_path'),
+            ('Usuario:',        'usuario'),
+            ('Senha SMB:',      'senha'),
+        ]
+        self._entries = {}
+        for row, (label, key) in enumerate(campos):
+            tk.Label(frame, text=label, anchor='w', font=('Segoe UI', 9)).grid(row=row, column=0, sticky='w', pady=4)
+            show = '*' if key == 'senha' else ''
+            entry = tk.Entry(frame, width=42, font=('Segoe UI', 9), show=show)
+            entry.grid(row=row, column=1, padx=8, pady=4)
+            if perfil:
+                entry.insert(0, perfil.get(key, ''))
+            self._entries[key] = entry
 
-        frame = tk.Frame(self)
-        frame.pack(padx=12, pady=4, fill='x')
-
-        tk.Label(frame, text='Pasta SMB:', anchor='w', font=('Segoe UI', 9)).grid(row=0, column=0, sticky='w', pady=4)
-        self._path = tk.Entry(frame, width=45, font=('Segoe UI', 9))
-        self._path.grid(row=0, column=1, padx=8, pady=4)
-
-        tk.Label(frame, text='Usuario:', anchor='w', font=('Segoe UI', 9)).grid(row=1, column=0, sticky='w', pady=4)
-        self._usuario = tk.Entry(frame, width=45, font=('Segoe UI', 9))
-        self._usuario.grid(row=1, column=1, padx=8, pady=4)
-
-        tk.Label(frame, text='Senha:', anchor='w', font=('Segoe UI', 9)).grid(row=2, column=0, sticky='w', pady=4)
-        self._senha = tk.Entry(frame, width=45, font=('Segoe UI', 9), show='*')
-        self._senha.grid(row=2, column=1, padx=8, pady=4)
-
-        # Preenche com valores atuais
-        try:
-            cfg = carregar_config()
-            self._path.insert(0, cfg.get('SMB', 'path', fallback=''))
-            self._usuario.insert(0, cfg.get('SMB', 'usuario', fallback=''))
-            self._senha.insert(0, cfg.get('SMB', 'senha', fallback=''))
-        except Exception:
-            pass
+        tk.Label(frame, text='Portal:', anchor='w', font=('Segoe UI', 9)).grid(row=len(campos), column=0, sticky='w', pady=4)
+        self._portal_var = tk.StringVar(value=perfil['portal'] if perfil else _PORTAIS[0])
+        portal_cb = ttk.Combobox(frame, textvariable=self._portal_var, values=_PORTAIS,
+                                  state='readonly', width=40, font=('Segoe UI', 9))
+        portal_cb.grid(row=len(campos), column=1, padx=8, pady=4)
 
         btn_frame = tk.Frame(self)
         btn_frame.pack(pady=10)
@@ -181,16 +229,96 @@ class DialogConfiguracoes(tk.Toplevel):
                   command=self.destroy).pack(side='left', padx=6)
 
     def _salvar(self):
-        path    = self._path.get().strip()
-        usuario = self._usuario.get().strip()
-        senha   = self._senha.get()
-        if not path or not usuario or not senha:
+        dados = {k: e.get().strip() for k, e in self._entries.items()}
+        dados['portal'] = self._portal_var.get()
+        if not all([dados['nome'], dados['smb_path'], dados['usuario'], dados['senha']]):
             messagebox.showwarning('Aviso', 'Preencha todos os campos.', parent=self)
             return
-        salvar_config(path, usuario, senha)
-        messagebox.showinfo('Sucesso', 'Configuracoes salvas.', parent=self)
+        self.resultado = dados
         self.destroy()
 
+
+# ── Diálogo de configurações (lista de perfis) ───────────────────────────────
+
+class DialogConfiguracoes(tk.Toplevel):
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.title('Configuracoes — Perfis')
+        self.resizable(False, False)
+        self.grab_set()
+        self._build_ui()
+        self._atualizar_lista()
+
+    def _build_ui(self):
+        tk.Label(self, text='Perfis configurados', font=('Segoe UI', 11, 'bold')).pack(padx=16, pady=(12, 4))
+
+        frame_lista = tk.Frame(self)
+        frame_lista.pack(padx=16, pady=4, fill='both', expand=True)
+
+        self._listbox = tk.Listbox(frame_lista, width=55, height=6, font=('Segoe UI', 9),
+                                    selectmode='single', activestyle='dotbox')
+        self._listbox.pack(side='left', fill='both', expand=True)
+
+        scroll = tk.Scrollbar(frame_lista, orient='vertical', command=self._listbox.yview)
+        scroll.pack(side='right', fill='y')
+        self._listbox.config(yscrollcommand=scroll.set)
+
+        btn_frame = tk.Frame(self)
+        btn_frame.pack(pady=8)
+        tk.Button(btn_frame, text='+ Adicionar', font=('Segoe UI', 9),
+                  bg='#16a34a', fg='white', relief='flat', padx=10, pady=4,
+                  command=self._adicionar).pack(side='left', padx=4)
+        tk.Button(btn_frame, text='✎ Editar', font=('Segoe UI', 9),
+                  relief='flat', padx=10, pady=4,
+                  command=self._editar).pack(side='left', padx=4)
+        tk.Button(btn_frame, text='✕ Remover', font=('Segoe UI', 9),
+                  bg='#dc2626', fg='white', relief='flat', padx=10, pady=4,
+                  command=self._remover).pack(side='left', padx=4)
+        tk.Button(btn_frame, text='Fechar', font=('Segoe UI', 9),
+                  relief='flat', padx=10, pady=4,
+                  command=self.destroy).pack(side='left', padx=4)
+
+    def _atualizar_lista(self):
+        self._perfis = listar_perfis()
+        self._listbox.delete(0, 'end')
+        for p in self._perfis:
+            self._listbox.insert('end', f"{p['nome']}  →  {p['portal']}  |  {p['smb_path']}")
+
+    def _adicionar(self):
+        dlg = DialogPerfil(self)
+        self.wait_window(dlg)
+        if dlg.resultado:
+            secao = proximo_secao()
+            r = dlg.resultado
+            salvar_perfil(secao, r['nome'], r['smb_path'], r['usuario'], r['senha'], r['portal'])
+            self._atualizar_lista()
+
+    def _editar(self):
+        sel = self._listbox.curselection()
+        if not sel:
+            messagebox.showwarning('Aviso', 'Selecione um perfil.', parent=self)
+            return
+        perfil = self._perfis[sel[0]]
+        dlg = DialogPerfil(self, perfil=perfil)
+        self.wait_window(dlg)
+        if dlg.resultado:
+            r = dlg.resultado
+            salvar_perfil(perfil['secao'], r['nome'], r['smb_path'], r['usuario'], r['senha'], r['portal'])
+            self._atualizar_lista()
+
+    def _remover(self):
+        sel = self._listbox.curselection()
+        if not sel:
+            messagebox.showwarning('Aviso', 'Selecione um perfil.', parent=self)
+            return
+        perfil = self._perfis[sel[0]]
+        if messagebox.askyesno('Confirmar', f'Remover perfil "{perfil["nome"]}"?', parent=self):
+            remover_perfil(perfil['secao'])
+            self._atualizar_lista()
+
+
+# ── App principal ─────────────────────────────────────────────────────────────
 
 class App(tk.Tk):
 
@@ -199,7 +327,7 @@ class App(tk.Tk):
         self.title('Processador de Notas Fiscais')
         self.resizable(False, False)
         self._build_ui()
-        self._carregar_info_config()
+        self._atualizar_perfis()
 
     def _build_ui(self):
         pad = {'padx': 12, 'pady': 6}
@@ -207,13 +335,18 @@ class App(tk.Tk):
         tk.Label(self, text='Processador de Notas Fiscais',
                  font=('Segoe UI', 13, 'bold')).pack(**pad)
 
-        frame_cfg = tk.LabelFrame(self, text='Configuracao', font=('Segoe UI', 9))
-        frame_cfg.pack(fill='x', padx=12, pady=4)
+        frame_perfis = tk.LabelFrame(self, text='Perfis', font=('Segoe UI', 9))
+        frame_perfis.pack(fill='x', padx=12, pady=4)
 
-        self._lbl_smb = tk.Label(frame_cfg, text='', anchor='w', font=('Segoe UI', 9))
-        self._lbl_smb.pack(fill='x', padx=8, pady=2)
+        self._perfis_vars = []
+        self._frame_checks = tk.Frame(frame_perfis)
+        self._frame_checks.pack(fill='x', padx=8, pady=4)
 
-        tk.Button(frame_cfg, text='⚙ Configuracoes', font=('Segoe UI', 8),
+        tk.Label(frame_perfis, text='Nenhum perfil configurado.',
+                 font=('Segoe UI', 9), fg='gray').pack(padx=8, anchor='w')
+        self._lbl_vazio = frame_perfis.winfo_children()[-1]
+
+        tk.Button(frame_perfis, text='⚙ Configuracoes', font=('Segoe UI', 8),
                   relief='flat', cursor='hand2',
                   command=self._abrir_config).pack(anchor='e', padx=8, pady=4)
 
@@ -237,20 +370,34 @@ class App(tk.Tk):
         frame_log.pack(fill='both', expand=True, padx=12, pady=4)
         self._log = scrolledtext.ScrolledText(
             frame_log, height=14, width=64,
-            font=('Consolas', 9), state='disabled',
-            wrap='word',
+            font=('Consolas', 9), state='disabled', wrap='word',
         )
         self._log.pack(padx=4, pady=4)
 
         tk.Button(self, text='Limpar log', font=('Segoe UI', 8),
                   command=self._limpar_log).pack(pady=(0, 8))
 
-    def _carregar_info_config(self):
-        try:
-            cfg = carregar_config()
-            self._lbl_smb.config(text=f"SMB: {cfg['SMB']['path']}")
-        except Exception:
-            self._lbl_smb.config(text='SMB: nao configurado')
+    def _atualizar_perfis(self):
+        for w in self._frame_checks.winfo_children():
+            w.destroy()
+        self._perfis_vars = []
+
+        perfis = listar_perfis()
+        if perfis:
+            self._lbl_vazio.pack_forget()
+            for p in perfis:
+                var = tk.BooleanVar(value=True)
+                cb = tk.Checkbutton(
+                    self._frame_checks,
+                    text=f"{p['nome']}  ({p['portal']})",
+                    variable=var,
+                    font=('Segoe UI', 9),
+                    anchor='w',
+                )
+                cb.pack(fill='x', pady=1)
+                self._perfis_vars.append((var, p))
+        else:
+            self._lbl_vazio.pack(padx=8, anchor='w')
 
     def _abrir_config(self):
         senha = simpledialog.askstring('Autenticacao', 'Senha:', show='*', parent=self)
@@ -261,7 +408,7 @@ class App(tk.Tk):
             return
         dlg = DialogConfiguracoes(self)
         self.wait_window(dlg)
-        self._carregar_info_config()
+        self._atualizar_perfis()
 
     def _log_write(self, msg: str):
         self._log.config(state='normal')
@@ -280,13 +427,17 @@ class App(tk.Tk):
         self._lbl_progress.config(text=f'{atual} / {total}')
 
     def _iniciar(self):
+        perfis_selecionados = [p for var, p in self._perfis_vars if var.get()]
+        if not perfis_selecionados:
+            messagebox.showwarning('Aviso', 'Selecione ao menos um perfil.')
+            return
         self._btn.config(state=tk.DISABLED)
         self._limpar_log()
         self._progress['value'] = 0
         self._lbl_progress.config(text='')
         threading.Thread(
             target=processar,
-            args=(self._log_write, self._atualizar_progress, self._btn),
+            args=(perfis_selecionados, self._log_write, self._atualizar_progress, self._btn),
             daemon=True,
         ).start()
 

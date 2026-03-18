@@ -17,12 +17,18 @@ def _br_to_float(value):
 
 class SupabaseClient:
 
-    def __init__(self, url: str, api_key: str, tabela: str):
+    _ENDPOINTS = {
+        'portal_municipal_manaus': 'portal-municipal-manaus',
+        'portal_estado_am':        'portal-estado-am',
+    }
+
+    def __init__(self, url: str, api_key: str, portal: str):
         self._base = url.rstrip('/')
         self._headers = {
             'x-api-key':    api_key,
             'Content-Type': 'application/json',
         }
+        self._path = self._ENDPOINTS.get(portal, portal)
         self._numeros_cache: set | None = None
 
     def carregar_numeros_existentes(self) -> None:
@@ -33,7 +39,7 @@ class SupabaseClient:
         if self._numeros_cache is not None and numero in self._numeros_cache:
             return True
         resp = requests.get(
-            f'{self._base}/aristoteles/faturamento/existe/{numero}',
+            f'{self._base}/{self._path}/faturamento/existe/{numero}',
             headers=self._headers,
             timeout=10,
         )
@@ -58,7 +64,7 @@ class SupabaseClient:
         }
 
         resp = requests.post(
-            f'{self._base}/aristoteles/faturamento',
+            f'{self._base}/{self._path}/faturamento',
             headers=self._headers,
             json=payload,
             timeout=15,

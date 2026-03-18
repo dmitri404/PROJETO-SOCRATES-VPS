@@ -1,10 +1,9 @@
 import os
 from fastapi import Header, HTTPException
 
-
 API_KEYS = {
-    "aristoteles":      os.getenv("API_KEY_ARISTOTELES"),
-    "portal-estado-am": os.getenv("API_KEY_PORTAL_ESTADO_AM"),
+    "portal_municipal_manaus": os.getenv("API_KEY_PORTAL_MUNICIPAL_MANAUS"),
+    "portal_estado_am":        os.getenv("API_KEY_PORTAL_ESTADO_AM"),
 }
 
 def verificar_api_key(app: str, x_api_key: str = Header(...)):

@@ -77,8 +77,8 @@ services:
       - DB_NAME=postgres
       - DB_USER=postgres
       - DB_PASSWORD=HKcSH_yTEsQ42cdEvhruQ9kNbrN54U4WfiLKDXD-Tf0
-      - API_KEY_ARISTOTELES=aris-22386d82643aa6e36b12688a7175698d
-      - API_KEY_PORTAL_ESTADO_AM=pea-a3f7c91d2b854e6a8d0f1c3e5b7a9d2f
+      - API_KEY_PORTAL_MUNICIPAL_MANAUS=aris-22386d82643aa6e36b12688a7175698d
+      - API_KEY_PORTAL_ESTADO_AM=estam-52394a9ff66f976ee2ab097a6844a7a4
     networks:
       - portal_default
       - supabase_default
