@@ -47,6 +47,16 @@ services:
     environment:
       - TZ=America/Manaus
 
+  cleaner-estado-am:
+    build: ./cleaner-estado-am
+    container_name: portal-cleaner-estado-am
+    restart: no
+    networks:
+      - portal_default
+      - supabase_default
+    environment:
+      - TZ=America/Manaus
+
   portal-estado-am:
     build: ./portal-estado-am
     container_name: portal-estado-am

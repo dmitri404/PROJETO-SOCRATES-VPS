@@ -1,0 +1,15 @@
+{
+  "database": {
+    "host": "supabase-db",
+    "port": 5432,
+    "name": "postgres",
+    "user": "postgres",
+    "password": ""
+  },
+  "processing": {
+    "batch_size": 100
+  },
+  "logging": {
+    "level": "INFO"
+  }
+}
